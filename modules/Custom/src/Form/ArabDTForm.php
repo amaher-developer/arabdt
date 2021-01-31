@@ -4,6 +4,8 @@ namespace Drupal\drupal_arabdt_form\Form;
 
 use Drupal\Core\Form\FormBase;
 use Drupal\Core\Form\FormStateInterface;
+use Drupal\file\Entity\File;
+use Drupal\file\FileInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
 /**
@@ -25,23 +27,25 @@ class ArabDTForm extends FormBase  {
 
     $form['description'] = [
       '#type' => 'item',
-      '#markup' => $this->t('Please enter the title and accept the terms of use of the site.'),
+      '#markup' => $this->t('<h1>Custom ArabDT Form</h1>'),
     ];
 
 
     $form['title'] = [
       '#type' => 'textfield',
-      '#title' => $this->t('Title'),
-      '#description' => $this->t('Enter the title of the book. Note that the title must be at least 10 characters in length.'),
+      '#title' => $this->t('Text Input'),
+      '#description' => $this->t('text input that must be more than 9 characters'),
       '#required' => TRUE,
     ];
     $form['file'] = [
       '#title' => $this->t('Upload file'),
       '#type' => 'file',
-      '#description' => $this->t('Upload file'),
-      '#required' => TRUE,
+      '#description' => $this->t('5 MB limit.'),
 //      '#upload_location' => 'private://',
-      '#multiple' => FALSE
+      '#multiple' => FALSE,
+      '#upload_location' => 'public://uploads/',
+      '#progress_message' => $this->t('Please wait...'),
+      '#size' => array(5485760),
     ];
     $form['select'] = [
       '#type' => 'select',
@@ -53,16 +57,14 @@ class ArabDTForm extends FormBase  {
         '3' => $this
           ->t('Three'),
       ],
-      '#title' => $this->t('Title'),
-      '#description' => $this->t('Enter the title of the book. Note that the title must be at least 10 characters in length.'),
+      '#title' => $this->t('Select'),
       '#required' => TRUE,
     ];
 
     $form['accept'] = array(
       '#type' => 'checkbox',
       '#title' => $this
-        ->t('I accept the terms of use of the site'),
-      '#description' => $this->t('Please read and accept the terms of use'),
+        ->t('CheckBox'),
     );
 
 
@@ -88,17 +90,13 @@ class ArabDTForm extends FormBase  {
 
     $title = $form_state->getValue('title');
     $select = $form_state->getValue('select');
-    $accept = $form_state->getValue('accept');
-    $file = $form_state->getValue('file');
-    $all_files = $this->getRequest()->files->get('file');
-    if (!empty($all_files['file'])) {
-      $file_upload = $all_files['file'];
-      if ($file_upload->isValid()) {
-        $form_state->setValue('file', $file_upload->getRealPath());
-      }
-    }else
-      $form_state->setErrorByName('file', $this->t('The file could not be uploaded.'));
+    $all_files = \Drupal::request()->files->get('files', array());
 
+    if (empty($all_files['file'])) {
+      $form_state->setErrorByName('file', $this->t('Upload file correctly.'));
+    }else{
+//      $this->file_move($all_files['file'], 'uploads/');
+    }
 
     if (strlen($title) < 10) {
       // Set an error for the form element with a key of "title".
@@ -124,11 +122,84 @@ class ArabDTForm extends FormBase  {
     // We should inject the messenger service, but its beyond the scope of this example.
     $messenger = \Drupal::messenger();
     $messenger->addMessage('Title: '.$form_state->getValue('title'));
-    $messenger->addMessage('Accept: '.$form_state->getValue('accept'));
+    $messenger->addMessage('Select: '.$form_state->getValue('select'));
+    $messenger->addMessage('Checkbox: '.$form_state->getValue('accept'));
+//    $messenger->addMessage('File: '.$form_state->getValue('file'));
 
     // Redirect to home
-    $form_state->setRedirect('<front>');
+    $form_state->setRedirect('drupal_arabdt_form.arabdt_form');
 
   }
 
+  function file_move(FileInterface $source, $destination = NULL, $replace = FILE_EXISTS_RENAME) {
+    if (!file_valid_uri($destination)) {
+      if (($realpath = drupal_realpath($source
+          ->getFileUri())) !== FALSE) {
+        \Drupal::logger('file')
+          ->notice('File %file (%realpath) could not be moved because the destination %destination is invalid. This may be caused by improper use of file_move() or a missing stream wrapper.', array(
+            '%file' => $source
+              ->getFileUri(),
+            '%realpath' => $realpath,
+            '%destination' => $destination,
+          ));
+      }
+      else {
+        \Drupal::logger('file')
+          ->notice('File %file could not be moved because the destination %destination is invalid. This may be caused by improper use of file_move() or a missing stream wrapper.', array(
+            '%file' => $source
+              ->getFileUri(),
+            '%destination' => $destination,
+          ));
+      }
+      drupal_set_message(t('The specified file %file could not be moved because the destination is invalid. More information is available in the system log.', array(
+        '%file' => $source
+          ->getFileUri(),
+      )), 'error');
+      return FALSE;
+    }
+    if ($uri = file_unmanaged_move($source
+      ->getFileUri(), $destination, $replace)) {
+      $delete_source = FALSE;
+      $file = clone $source;
+      $file
+        ->setFileUri($uri);
+
+      // If we are replacing an existing file re-use its database record.
+      if ($replace == FILE_EXISTS_REPLACE) {
+        $existing_files = entity_load_multiple_by_properties('file', array(
+          'uri' => $uri,
+        ));
+        if (count($existing_files)) {
+          $existing = reset($existing_files);
+          $delete_source = TRUE;
+          $file->fid = $existing
+            ->id();
+          $file->uuid = $existing
+            ->uuid();
+        }
+      }
+      elseif ($replace == FILE_EXISTS_RENAME && is_file($destination)) {
+        $file
+          ->setFilename(drupal_basename($destination));
+      }
+      $file
+        ->save();
+
+      // Inform modules that the file has been moved.
+      \Drupal::moduleHandler()
+        ->invokeAll('file_move', array(
+          $file,
+          $source,
+        ));
+
+      // Delete the original if it's not in use elsewhere.
+      if ($delete_source && !\Drupal::service('file.usage')
+          ->listUsage($source)) {
+        $source
+          ->delete();
+      }
+      return $file;
+    }
+    return FALSE;
+  }
 }
