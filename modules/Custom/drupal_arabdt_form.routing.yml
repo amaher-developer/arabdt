@@ -1,0 +1,14 @@
+drupal_arabdt_form.arabdt_form:
+  path: 'arabdt-form'
+  defaults:
+    _form: '\Drupal\drupal_arabdt_form\Form\ArabDTForm'
+    _title: 'Our cool form'
+  requirements:
+    _permission: 'access content'
+drupal_arabdt_form.arabdt_ajax_form:
+  path: 'arabdt-ajax-form'
+  defaults:
+    _form: '\Drupal\drupal_arabdt_form\Form\ArabDTAjaxForm'
+    _title: 'Our cool ajax form'
+  requirements:
+    _permission: 'access content'
